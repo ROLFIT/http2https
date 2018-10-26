@@ -1,7 +1,7 @@
-// server
 package main
 
 import (
+	"bytes"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/rsa"
@@ -20,8 +20,6 @@ import (
 func startServer() {
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 
-		//r.URL.Path = strings.ToLower(r.URL.Path)
-
 		start := time.Now()
 		writer := statusWriter{w, 0, 0}
 		proxy(&writer, r)
@@ -33,22 +31,27 @@ func startServer() {
 		if !ok {
 			user = "-"
 		}
-		url := r.URL.Path
+		hostFromTo := fmt.Sprintf("%s -> %s:%v", r.Host, *destHostFlag, *destPortFlag)
+		cl := fmt.Sprintf("Content-Length: %d", r.ContentLength)
+		ct := fmt.Sprintf("Content-Type: %s", r.Header.Get("Content-Type"))
 
+		url := r.URL.Path
 		params := r.Form.Encode()
 		if params != "" {
 			url = url + "?" + params
 		}
 
-		writeToLog(fmt.Sprintf("%s, %s, %s, %s, %s, %s, %d, %d, %d, %d, %s, %s, %v\r\n",
+		writeToLog(fmt.Sprintf("v%s: %s, %s, %s, %s, %s, %s, %s, %s, %d, %d, %d, %s, %s, %v\r\n",
+			version,
 			r.RemoteAddr,
 			user,
 			end.Format("2006.01.02"),
 			end.Format("15:04:05.000000000"),
 			r.Proto,
-			r.Host,
+			hostFromTo,
+			ct,
+			cl,
 			length,
-			r.ContentLength,
 			time.Since(start)/time.Millisecond,
 			statusCode,
 			r.Method,
@@ -67,7 +70,29 @@ func stopServer() {
 }
 
 func proxy(w http.ResponseWriter, r *http.Request) {
-	newURL := "https://" + *destHostFlag
+	var (
+		proto      string
+		protoMajor int
+		protoMinor int
+		ok         bool
+	)
+
+	if protoMajor, protoMinor, ok = http.ParseHTTPVersion(*destHostProto); !ok {
+		fmt.Fprintf(w, "Malformed HTTP version %s", *destHostProto)
+		if *debugFlag {
+			fmt.Println("Malformed HTTP version " + *destHostProto)
+		}
+		return
+	}
+
+	if protoMajor == 1 && protoMinor == 0 {
+		proto = "http"
+	} else if protoMajor == 1 && protoMinor == 1 {
+		proto = "https"
+	}
+
+	newURL := fmt.Sprintf("%s://%s", proto, *destHostFlag)
+
 	if *destPortFlag != 443 {
 		newURL = newURL + fmt.Sprintf(":%v", *destPortFlag)
 	}
@@ -84,21 +109,24 @@ func proxy(w http.ResponseWriter, r *http.Request) {
 		cert    tls.Certificate
 	)
 
-	newReq, err = http.NewRequest(r.Method, newURL, r.Body)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, "Error: %s!", err.Error())
+	body, err := ioutil.ReadAll(r.Body)
+	if !isError(w, err) {
 		return
 	}
+
+	newReq, err = http.NewRequest(r.Method, newURL, bytes.NewBuffer(body))
+
+	if !isError(w, err) {
+		return
+	}
+
 	copyHeaders(newReq.Header, r.Header)
 
 	tlsClientConfig := tls.Config{InsecureSkipVerify: true}
 
 	if (*destCertFlag) != "" {
 		cert, err = loadX509KeyPair(*destCertFlag, *destKeyFlag, *destKeyPassFlag)
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			fmt.Fprintf(w, "Error: %s!", err.Error())
+		if !isError(w, err) {
 			return
 		}
 		tlsClientConfig.Certificates = []tls.Certificate{cert}
@@ -109,14 +137,15 @@ func proxy(w http.ResponseWriter, r *http.Request) {
 	client := &http.Client{Transport: tr}
 
 	reqDumped := dumpRequest(newReq)
-
 	newResp, err = client.Do(newReq)
+
+	if !isError(w, err) {
+		return
+	}
+
 	dumpResponse(reqDumped, newResp)
 
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, "Error: %s!", err.Error())
-		fmt.Println(err.Error())
+	if !isError(w, err) {
 		return
 	}
 
@@ -124,7 +153,6 @@ func proxy(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(newResp.StatusCode)
 	io.Copy(w, newResp.Body)
 	newResp.Body.Close()
-
 }
 
 func loadX509KeyPair(certFile, keyFile, pw string) (cert tls.Certificate, err error) {
@@ -136,10 +164,10 @@ func loadX509KeyPair(certFile, keyFile, pw string) (cert tls.Certificate, err er
 	if err != nil {
 		return
 	}
-	return X509KeyPair(certPEMBlock, keyPEMBlock, []byte(pw))
+	return x509KeyPair(certPEMBlock, keyPEMBlock, []byte(pw))
 }
 
-func X509KeyPair(certPEMBlock, keyPEMBlock, pw []byte) (cert tls.Certificate, err error) {
+func x509KeyPair(certPEMBlock, keyPEMBlock, pw []byte) (cert tls.Certificate, err error) {
 	var certDERBlock *pem.Block
 	for {
 		certDERBlock, certPEMBlock = pem.Decode(certPEMBlock)
@@ -239,7 +267,7 @@ func parsePrivateKey(der []byte) (crypto.PrivateKey, error) {
 }
 
 func copyHeaders(dst, src http.Header) {
-	for k, _ := range dst {
+	for k := range dst {
 		dst.Del(k)
 	}
 	for k, vs := range src {
@@ -247,4 +275,17 @@ func copyHeaders(dst, src http.Header) {
 			dst.Add(k, v)
 		}
 	}
+}
+
+func isError(w http.ResponseWriter, e error) bool {
+	if e == nil {
+		return true
+	}
+
+	w.WriteHeader(http.StatusInternalServerError)
+	fmt.Fprintf(w, "Error: %s!", e.Error())
+	if *debugFlag {
+		fmt.Println(e.Error())
+	}
+	return false
 }

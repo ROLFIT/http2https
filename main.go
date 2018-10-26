@@ -1,7 +1,5 @@
-// main
 package main
 
-//go:generate C:\!Dev\GOPATH\src\github.com\vsdutka\gover\gover.exe
 import (
 	"flag"
 	"fmt"
@@ -20,6 +18,7 @@ var (
 	verFlag             *bool
 	svcFlag             *string
 	listenPortFlag      *int
+	destHostProto       *string
 	destHostFlag        *string
 	destPortFlag        *int
 	destCertFlag        *string
@@ -38,6 +37,7 @@ func logInfof(format string, a ...interface{}) error {
 	}
 	return nil
 }
+
 func logError(v ...interface{}) error {
 	loggerLock.Lock()
 	defer loggerLock.Unlock()
@@ -65,6 +65,7 @@ func (p *program) Start(s service.Service) error {
 	go p.run()
 	return nil
 }
+
 func (p *program) run() {
 	startServer()
 	logInfof("Service \"%s\" is started.", confServiceDispName)
@@ -75,6 +76,7 @@ func (p *program) run() {
 		}
 	}
 }
+
 func (p *program) Stop(s service.Service) error {
 	// Any work in Stop should be quick, usually a few seconds at most.
 	logInfof("Service \"%s\" is stopping.", confServiceDispName)
@@ -97,6 +99,7 @@ func main() {
 	verFlag = flag.Bool("version", false, "Show version")
 	svcFlag = flag.String("service", "", fmt.Sprintf("Control the system service. Valid actions: %q\n", service.ControlAction))
 	listenPortFlag = flag.Int("listen_port", 13777, "Listening port")
+	destHostProto = flag.String("dest_proto", "HTTP/1.1", "Destination host http version: HTTP/1.0 or HTTP/1.1")
 	destHostFlag = flag.String("dest_host", "", "Destination host name")
 	destPortFlag = flag.Int("dest_port", 443, "Destination port")
 	destCertFlag = flag.String("dest_cert", "", "Destination certificate file name")
@@ -106,8 +109,8 @@ func main() {
 	flag.Parse()
 
 	if *verFlag == true {
-		fmt.Println("Version: ", VERSION)
-		fmt.Println("Build:   ", BUILD_DATE)
+		fmt.Println("Version: ", version)
+		fmt.Println("Build:   ", buildName)
 		os.Exit(0)
 	}
 

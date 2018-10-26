@@ -20,6 +20,7 @@ func dumpRequest(req *http.Request) string {
 	}
 	return s
 }
+
 func dumpResponse(reqDump string, resp *http.Response) {
 	if *debugFlag {
 		s := reqDump
