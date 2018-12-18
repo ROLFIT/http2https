@@ -19,7 +19,6 @@ import (
 
 func startServer() {
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-
 		start := time.Now()
 		writer := statusWriter{w, 0, 0}
 		proxy(&writer, r)
@@ -60,7 +59,11 @@ func startServer() {
 		))
 	})
 
-	if err := http.ListenAndServe(fmt.Sprintf(":%v", *listenPortFlag), nil); err != nil {
+	server := &http.Server{
+		Addr: fmt.Sprintf(":%v", *listenPortFlag),
+	}
+
+	if err := server.ListenAndServe(); err != nil {
 		logError(err)
 	}
 }

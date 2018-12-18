@@ -130,6 +130,7 @@ func main() {
 			fmt.Sprintf("-listen_port=%v", *listenPortFlag),
 			fmt.Sprintf("-dest_host=%s", *destHostFlag),
 			fmt.Sprintf("-dest_port=%v", *destPortFlag),
+			fmt.Sprintf("-dest_proto=%s", *destHostProto),
 			fmt.Sprintf("-dest_cert=%s", *destCertFlag),
 			fmt.Sprintf("-dest_key=%s", *destKeyFlag),
 			fmt.Sprintf("-dest_key_pass=%s", *destKeyPassFlag),
